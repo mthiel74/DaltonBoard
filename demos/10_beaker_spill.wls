@@ -83,8 +83,13 @@ bbox = PhysicsBoundaryBox[{
   {-0.3, -0.4, -0.08}, {2.3, 0.4, 1.7}},
   "Thickness" -> 0.3];
 
-(* -- Stitched-simulation controller -- *)
-nSegments   = 50;
+(* -- Stitched-simulation controller --
+     nRotSeg: segments during which the beaker rotates 0 -> tiltFinal.
+     nSettleSeg: additional segments at tiltFinal so the spilled
+     balls have time to settle on the table. *)
+nRotSeg     = 50;
+nSettleSeg  = 60;
+nSegments   = nRotSeg + nSettleSeg;
 stepsPerSeg = 30;
 tiltFinal   = 125 Degree;
 dt          = 1/240.;
@@ -98,7 +103,12 @@ t0 = AbsoluteTime[];
 
 Do[
   Module[{tilt, walls, ballBodies, model, worldId, ballHandles, prevPos, frames},
-    tilt = tiltFinal * (seg - 1) / (nSegments - 1);
+    (* Ramp tilt from 0 to tiltFinal during the first nRotSeg
+       segments; hold at tiltFinal for the remaining nSettleSeg
+       settle segments. *)
+    tilt = If[seg <= nRotSeg,
+      tiltFinal * (seg - 1) / (nRotSeg - 1),
+      tiltFinal];
     walls = beakerWalls[tilt];
 
     ballBodies = Table[
