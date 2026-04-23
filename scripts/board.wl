@@ -13,16 +13,19 @@ $PegRadius::usage  = "$PegRadius = peg cylinder radius.";
 $BallRadius::usage = "$BallRadius = ball sphere radius.";
 $SlabHalfY::usage  = "$SlabHalfY = half-thickness of the slab in the Y direction.";
 
-(* Classical "close-packed" Galton-board geometry: big pegs arranged in a
-   hexagonal grid so that the ball rolls over each peg and drops into a
-   V-shaped valley between the two pegs in the next row. dz = dx*sqrt(3)/2
-   keeps peg centres on an equilateral triangular lattice. *)
-$PegRows    = 10;
-$PegDx      = 0.30;
-$PegDz      = 0.30 * 0.8660254;   (* sqrt(3)/2 *)
-$PegRadius  = 0.13;               (* large pegs, edges nearly touch in a row *)
-$BallRadius = 0.045;              (* small ball rolls over peg tops *)
-$SlabHalfY  = 0.10;
+(* Classical pin-and-ball Galton geometry. Pegs are small pin-like
+   colliders (much smaller than the ball) so each one is a discrete
+   deflector rather than a slab of a solid barrier. The horizontal peg
+   spacing dx is chosen so that adjacent pegs' contact zones OVERLAP
+   (dx < 2*(ball_r + peg_r)) -- the ball can never slip past a row
+   without touching a peg.  Hexagonal vertical spacing dz = dx*sqrt(3)/2
+   for a close-packed triangular lattice. *)
+$PegRows    = 18;
+$PegRadius  = 0.025;
+$BallRadius = 0.080;
+$PegDx      = 0.15;              (* < 2*(ball_r + peg_r) = 0.21, so zones overlap *)
+$PegDz      = 0.13;              (* = dx * sqrt(3)/2 *)
+$SlabHalfY  = 0.14;
 
 (* -- Derived -- *)
 $BoardHalfWidth::usage = "half the horizontal extent of the bounding box.";
@@ -31,28 +34,27 @@ $BoardBottomZ::usage   = "z of the bin floor.";
 $BinTopZ::usage        = "z at which bin separators start.";
 
 $BoardTopZ       = 0.0;
-$BoardBottomZ    = -($PegRows - 1)*$PegDz - 2.5;    (* bin depth ~2.5 below last peg row *)
-$BinTopZ         = -($PegRows - 1)*$PegDz - 0.3;
-(* Side walls flush with outermost bin edges so there is no lateral overflow zone. *)
-$BoardHalfWidth  = ($PegRows + 1)/2 * $PegDx;
+$BoardBottomZ    = -($PegRows - 1)*$PegDz - 3.0;    (* bin depth ~3 m below last peg row *)
+$BinTopZ         = -($PegRows - 1)*$PegDz - 0.4;
+$BoardHalfWidth  = ($PegRows + 1)/2. * $PegDx;      (* walls flush with outermost bin edges *)
 
-PegList::usage = "PegList[] returns a list of FixedBody pegs laid out in a triangular grid.";
-PegList::usage = "PegList[] returns the (pristine) triangular peg grid.  PegList[jitter] returns the same grid but with each peg's x-coordinate perturbed uniformly in [-jitter, jitter]; use a fresh RandomReal seed per call to generate trial-to-trial variation.";
+$PegCols::usage = "$PegCols = number of peg columns. Each row has $PegCols pegs; odd rows are offset by $PegDx/2 so the lattice is hexagonal alternating-offset, which is the classical Galton geometry. Rectangular (not triangular) ensures balls cannot escape the array laterally.";
+$PegCols = 19;  (* odd so the array is symmetric about x=0 *)
+
+PegList::usage = "PegList[] returns the (pristine) rectangular peg grid.  PegList[jitter] returns the same grid but with each peg's x-coordinate perturbed uniformly in [-jitter, jitter]; use a fresh RandomReal seed per call to generate trial-to-trial variation.";
 PegList[] := PegList[0.0];
-PegList[jitter_?NumericQ] := Module[{row, j, xs, pegs = {}, xj},
+PegList[jitter_?NumericQ] := Module[{row, j, offset, xj, x, pegs = {}},
   Do[
-    xs = Table[(j - row/2.0) * $PegDx, {j, 0, row}];
+    offset = If[OddQ[row], $PegDx/2, 0.];
     Do[
+      x  = (j - ($PegCols - 1)/2.0) * $PegDx + offset;
       xj = x + If[jitter > 0, RandomReal[{-jitter, jitter}], 0.];
       AppendTo[pegs,
         FixedBody[{GrayLevel[0.35],
           Cylinder[{{xj, -$SlabHalfY, -row*$PegDz},
                     {xj,  $SlabHalfY, -row*$PegDz}}, $PegRadius]},
-          (* Moderate restitution + good friction: ball rolls over each peg
-             and slides down one side of the valley between the two pegs
-             below.  This is how a physical Galton board actually works. *)
-          "Restitution" -> 0.25, "Friction" -> 0.8]],
-      {x, xs}],
+          "Restitution" -> 0.5, "Friction" -> 0.3]],
+      {j, 0, $PegCols - 1}],
     {row, 0, $PegRows - 1}];
   pegs];
 
@@ -82,8 +84,8 @@ MakeBall::usage = "MakeBall[pos, {vx,vz}] returns a DynamicBody sphere at pos=(x
 MakeBall[{x_, z_}, {vx_: 0., vz_: 0.}, color_: Automatic] :=
   DynamicBody[{If[color === Automatic, Hue[RandomReal[]], color], Sphere[{x, 0., z}, $BallRadius]},
     "Density"     -> 1.0,
-    "Restitution" -> 0.25,
-    "Friction"    -> 0.8,
+    "Restitution" -> 0.5,
+    "Friction"    -> 0.3,
     "Velocity"    -> {vx, 0., vz}];
 
 DefaultGraphics3DOpts::usage = "Plot options used for both the animation and histogram scripts.";
