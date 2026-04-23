@@ -13,12 +13,16 @@ $PegRadius::usage  = "$PegRadius = peg cylinder radius.";
 $BallRadius::usage = "$BallRadius = ball sphere radius.";
 $SlabHalfY::usage  = "$SlabHalfY = half-thickness of the slab in the Y direction.";
 
+(* Classical "close-packed" Galton-board geometry: big pegs arranged in a
+   hexagonal grid so that the ball rolls over each peg and drops into a
+   V-shaped valley between the two pegs in the next row. dz = dx*sqrt(3)/2
+   keeps peg centres on an equilateral triangular lattice. *)
 $PegRows    = 10;
-$PegDx      = 0.70;
-$PegDz      = 0.60;
-$PegRadius  = 0.07;
-$BallRadius = 0.12;
-$SlabHalfY  = 0.18;  (* a bit thicker than ball so 2D motion isn't grinding friction *)
+$PegDx      = 0.30;
+$PegDz      = 0.30 * 0.8660254;   (* sqrt(3)/2 *)
+$PegRadius  = 0.13;               (* large pegs, edges nearly touch in a row *)
+$BallRadius = 0.045;              (* small ball rolls over peg tops *)
+$SlabHalfY  = 0.10;
 
 (* -- Derived -- *)
 $BoardHalfWidth::usage = "half the horizontal extent of the bounding box.";
@@ -33,15 +37,21 @@ $BinTopZ         = -($PegRows - 1)*$PegDz - 0.3;
 $BoardHalfWidth  = ($PegRows + 1)/2 * $PegDx;
 
 PegList::usage = "PegList[] returns a list of FixedBody pegs laid out in a triangular grid.";
-PegList[] := Module[{row, j, xs, pegs = {}},
+PegList::usage = "PegList[] returns the (pristine) triangular peg grid.  PegList[jitter] returns the same grid but with each peg's x-coordinate perturbed uniformly in [-jitter, jitter]; use a fresh RandomReal seed per call to generate trial-to-trial variation.";
+PegList[] := PegList[0.0];
+PegList[jitter_?NumericQ] := Module[{row, j, xs, pegs = {}, xj},
   Do[
     xs = Table[(j - row/2.0) * $PegDx, {j, 0, row}];
     Do[
+      xj = x + If[jitter > 0, RandomReal[{-jitter, jitter}], 0.];
       AppendTo[pegs,
         FixedBody[{GrayLevel[0.35],
-          Cylinder[{{x, -$SlabHalfY, -row*$PegDz},
-                    {x,  $SlabHalfY, -row*$PegDz}}, $PegRadius]},
-          "Restitution" -> 0.35, "Friction" -> 0.4]],
+          Cylinder[{{xj, -$SlabHalfY, -row*$PegDz},
+                    {xj,  $SlabHalfY, -row*$PegDz}}, $PegRadius]},
+          (* Moderate restitution + good friction: ball rolls over each peg
+             and slides down one side of the valley between the two pegs
+             below.  This is how a physical Galton board actually works. *)
+          "Restitution" -> 0.25, "Friction" -> 0.8]],
       {x, xs}],
     {row, 0, $PegRows - 1}];
   pegs];
@@ -71,9 +81,9 @@ BoundaryWalls[] := BoundaryWalls[$BoardTopZ + 2.5];
 MakeBall::usage = "MakeBall[pos, {vx,vz}] returns a DynamicBody sphere at pos=(x,z) (y=0) with lateral velocity components.";
 MakeBall[{x_, z_}, {vx_: 0., vz_: 0.}, color_: Automatic] :=
   DynamicBody[{If[color === Automatic, Hue[RandomReal[]], color], Sphere[{x, 0., z}, $BallRadius]},
-    "Density"     -> 1.2,
+    "Density"     -> 1.0,
     "Restitution" -> 0.25,
-    "Friction"    -> 0.4,
+    "Friction"    -> 0.8,
     "Velocity"    -> {vx, 0., vz}];
 
 DefaultGraphics3DOpts::usage = "Plot options used for both the animation and histogram scripts.";
