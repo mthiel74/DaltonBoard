@@ -1,83 +1,77 @@
 #!/usr/bin/env wolframscript
-(* 03_histogram.wls -- run N independent one-ball simulations, record the
-   final bin index for each ball, and compare the empirical distribution
-   against the binomial (Bin(N_rows, 1/2)) and the Normal(mu, sigma)
-   approximation predicted by the central limit theorem. *)
+(* 03_histogram.wls -- REAL-PHYSICS statistical characterisation of the
+   Galton board.  Each trial runs an independent single-ball Rapier
+   simulation with:
+     - rectangular alternating-offset peg array (physical cylinder
+       colliders wrapped in FixedBody),
+     - per-trial small random peg-x jitter (the only source of
+       stochasticity in an otherwise deterministic rigid-body engine),
+     - linear velocity damping every few physics steps to mimic air
+       drag (Rapier has no built-in drag),
+     - ball genuinely bouncing off every peg it contacts.
+   The empirical distribution of final bin indices is compared against
+   Binomial(N, 1/2) and the Normal approximation predicted by the
+   Central Limit Theorem. *)
 
 Needs["ArnoudBuzing`PhysicsModelLink`"];
 Get[FileNameJoin[{DirectoryName[$InputFileName], "board.wl"}]];
 
-CreatePhysicsModel   = ArnoudBuzing`PhysicsModelLink`CreatePhysicsModel;
-DynamicBody          = ArnoudBuzing`PhysicsModelLink`DynamicBody;
-FixedBody            = ArnoudBuzing`PhysicsModelLink`FixedBody;
-PhysicsModelIterate  = ArnoudBuzing`PhysicsModelLink`PhysicsModelIterate;
-DestroyPhysicsModel  = ArnoudBuzing`PhysicsModelLink`DestroyPhysicsModel;
+CreatePhysicsModel    = ArnoudBuzing`PhysicsModelLink`CreatePhysicsModel;
+DynamicBody           = ArnoudBuzing`PhysicsModelLink`DynamicBody;
+FixedBody             = ArnoudBuzing`PhysicsModelLink`FixedBody;
+PhysicsModelIterate   = ArnoudBuzing`PhysicsModelLink`PhysicsModelIterate;
+DestroyPhysicsModel   = ArnoudBuzing`PhysicsModelLink`DestroyPhysicsModel;
 RapierSetBodyVelocity = ArnoudBuzing`PhysicsModelLink`RapierSetBodyVelocity;
 
-SeedRandom[20260423];
+SeedRandom[20260424];
 
-nTrials = ToExpression @ Environment["GBOARD_TRIALS"] /. $Failed | Null -> 500;
-Print["running ", nTrials, " independent trials..."];
+getParam[name_String, default_] :=
+  With[{e = Environment[name]},
+    If[StringQ[e] && StringLength[e] > 0, ToExpression[e], default]];
 
-bins = GaltonBoard`BinSeparators[];
-floor = FixedBody[{GrayLevel[0.85],
+nTrials   = getParam["GBOARD_TRIALS", 400];
+gravity   = getParam["GRAV",   9.81];
+damping   = getParam["DAMP",   0.99];
+dampEvery = getParam["DAMP_EVERY", 4];
+pegJitter = getParam["JITTER", 0.025];
+dt        = 1/240.;
+maxSteps  = 1800;
+
+Print["running ", nTrials, " real-physics trials (g=", gravity,
+      "; drag=", damping, "/", dampEvery, "steps; peg jitter=", pegJitter, "m)"];
+
+binSep = GaltonBoard`BinSeparators[];
+floor  = FixedBody[{GrayLevel[0.85],
            Cuboid[{-GaltonBoard`$BoardHalfWidth, -GaltonBoard`$SlabHalfY,
                    GaltonBoard`$BoardBottomZ},
                   { GaltonBoard`$BoardHalfWidth,  GaltonBoard`$SlabHalfY,
-                   GaltonBoard`$BoardBottomZ + 0.15}]},
-           "Restitution" -> 0.05, "Friction" -> 1.0];
-walls = GaltonBoard`BoundaryWalls[GaltonBoard`$BoardTopZ + 2.5];
+                   GaltonBoard`$BoardBottomZ + 0.12}]},
+           "Restitution" -> 0.1, "Friction" -> 0.9];
+walls  = GaltonBoard`BoundaryWalls[GaltonBoard`$BoardTopZ + 2.5];
 
-dt          = 1/240.;  (* finer dt than the animation to prevent tunneling *)
-maxSteps    = 3000;    (* up to 12.5 s per ball *)
-settleZ     = GaltonBoard`$BinTopZ;
-pegJitter   = 0.06;    (* per-trial random x perturbation of each peg (~peg radius/2) *)
-
-(* After each peg-row crossing, damp the ball's lateral (x, y) velocity so
-   the next row's deflection is a fresh coin-flip from a near-vertical
-   trajectory. This is the standard Galton-board idealisation: each row is
-   an independent Bernoulli step. *)
-(* Pure Galton simulation: ball falls under gravity; at each "virtual peg
-   row" we impose a fresh coin-flip impulse ±dx/(2 dt_row). Pegs are
-   omitted from this model — they live in the animation script for the
-   visual demonstration. The physics here is still real (gravity +
-   containing walls + bin separators); the only abstraction is that the
-   peg-ball bounce is replaced by the impulse its mean effect would give.
-*)
 runOne[seed_Integer] := Module[
-  {ballX0, ballVx0, ball, model, current, nsteps, pos,
-   worldId, bodyId, rowIdx, rowDt, rowVx},
+  {ballX0, pegs, ball, model, worldId, bodyId, current, prevPos, curPos, vel, nsteps, pos},
   SeedRandom[seed];
-  ballX0   = 0.;
-  ballVx0  = 0.;
-  ball = GaltonBoard`MakeBall[
-           {ballX0, GaltonBoard`$BoardTopZ + 0.05},
-           {ballVx0, 0.},
-           RGBColor[0.85, 0.2, 0.2]];
-  model   = CreatePhysicsModel[
-    Join[{ball}, bins, {floor}, walls],
-    "Gravity" -> {0., 0., -9.81}];
+  pegs   = GaltonBoard`PegList[pegJitter];
+  ballX0 = RandomReal[{-0.02, 0.02}];
+  ball = GaltonBoard`MakeBall[{ballX0, GaltonBoard`$BoardTopZ + 0.5}, {0., 0.},
+            RGBColor[0.9, 0.25, 0.25]];
+  model = CreatePhysicsModel[
+    Join[{ball}, pegs, binSep, {floor}, walls],
+    "Gravity" -> {0., 0., -gravity}];
   worldId = model[[1]]["WorldID"];
   bodyId  = model[[1]]["Bodies"][[1]]["Handle"];
   current = model;
   nsteps  = 0;
-  rowIdx  = 0;  (* next peg-row we haven't passed yet *)
-  (* One ±dx/(2 * dt_row) impulse per virtual row-crossing. Between rows the
-     ball is in free-fall, so vx we impose + vz from gravity carry it
-     exactly to the next peg column. *)
-  rowDt  = Sqrt[2 * GaltonBoard`$PegDz / 9.81];
-  rowVx  = GaltonBoard`$PegDx / (2 * rowDt);
+  prevPos = current[[1]]["Bodies"][[1]]["Position"];
   While[nsteps < maxSteps,
-    current = PhysicsModelIterate[current, 8, dt];
-    nsteps += 8;
-    pos = current[[1]]["Bodies"][[1]]["Position"];
-    While[rowIdx < GaltonBoard`$PegRows &&
-          pos[[3]] < -rowIdx * GaltonBoard`$PegDz + 0.01,
-      RapierSetBodyVelocity[worldId, bodyId,
-        {RandomChoice[{-1., 1.}] * rowVx, 0., 0.}];  (* vz=0: reset vertical so per-row fall time is consistent *)
-      rowIdx++;
-    ];
-    If[pos[[3]] < settleZ + 0.3 && nsteps > 200, Break[]]
+    current = PhysicsModelIterate[current, dampEvery, dt];
+    nsteps += dampEvery;
+    curPos = current[[1]]["Bodies"][[1]]["Position"];
+    vel    = (curPos - prevPos) / (dampEvery * dt);
+    RapierSetBodyVelocity[worldId, bodyId, vel * damping];
+    prevPos = curPos;
+    If[curPos[[3]] < -GaltonBoard`$PegRows*GaltonBoard`$PegDz - 0.8, Break[]]
   ];
   pos = current[[1]]["Bodies"][[1]]["Position"];
   DestroyPhysicsModel[model];
@@ -92,59 +86,54 @@ results = Table[
   {k, 1, nTrials}];
 Print["all ", nTrials, " trials done in ", Round[AbsoluteTime[] - t0, 0.1], " s."];
 
-bins11 = Table[Count[results, KeyValuePattern["Bin" -> b]], {b, 1, GaltonBoard`$PegRows + 1}];
-Print["empirical bin counts (", Total[bins11], " balls): ", bins11];
+nBins = GaltonBoard`$PegRows + 1;
+bins  = Table[Count[results, KeyValuePattern["Bin" -> b]], {b, 1, nBins}];
+Print["empirical bin counts: ", bins];
 
-(* Theoretical: Binomial(N=PegRows, 1/2) on k = 0..PegRows, bin k maps to bin (k+1) *)
 N0       = GaltonBoard`$PegRows;
 binomPMF = Table[Binomial[N0, k]/2.^N0, {k, 0, N0}];
 binomExp = binomPMF * nTrials;
-Print["binomial(", N0, ", 0.5) expected counts: ", NumberForm[#, {5, 1}] & /@ binomExp];
+Print["binomial(", N0, ", 1/2)*n: ", NumberForm[#, {5, 1}] & /@ binomExp];
 
-(* Chi-square goodness-of-fit vs binomial (only for bins with expected >= 5) *)
-chi2   = Total[MapThread[If[#2 >= 5, (#1 - #2)^2/#2, 0] &, {bins11, binomExp}]];
+chi2   = Total[MapThread[If[#2 >= 5, (#1 - #2)^2/#2, 0] &, {bins, binomExp}]];
 dof    = Length[Select[binomExp, # >= 5 &]] - 1;
 Print["chi^2 = ", NumberForm[chi2, {6, 2}], "  (dof=", dof, ")"];
-Print["p-value (larger = better fit) = ",
-      NumberForm[SurvivalFunction[ChiSquareDistribution[dof], chi2], {5, 3}]];
+Print["p-value = ", NumberForm[SurvivalFunction[ChiSquareDistribution[dof], chi2], {5, 3}]];
 
-(* Plot: empirical histogram vs binomial PMF (scaled) vs Normal curve.
-   Build the bar chart from Rectangle primitives to avoid BarChart's
-   idiosyncratic option handling inside Show[]. *)
-centers    = GaltonBoard`BinCenters[];
-empDensity = bins11 / N[nTrials];
+(* -- Plot: bars of empirical density + Binomial PMF + Normal PDF -- *)
+empDensity = bins / N[nTrials];
 yMax       = 1.15 * Max[empDensity, binomPMF];
 barsGraphics = Graphics[{
   Opacity[0.55], RGBColor[0.35, 0.55, 0.85],
-  Table[Rectangle[{k - 0.45, 0}, {k + 0.45, empDensity[[k]]}], {k, 1, N0 + 1}]
+  Table[Rectangle[{k - 0.45, 0}, {k + 0.45, empDensity[[k]]}], {k, 1, nBins}]
 }];
-empBars = Show[barsGraphics,
-            Frame -> True, Axes -> False,
-            FrameLabel -> {"bin index", "frequency"},
-            PlotLabel -> Row[{"Empirical distribution of final bin, n = ", nTrials}],
-            PlotRange -> {{0.3, N0 + 1.7}, {0, yMax}},
-            ImageSize -> 720, AspectRatio -> 0.6];
-
-mu    = (N0 + 2) / 2.;                (* central bin index for a symmetric walk *)
-sigma = Sqrt[N0] / 2.;                (* stdev of the binomial in bin-index units *)
+mu    = (N0 + 2) / 2.;
+sigma = Sqrt[N0] / 2.;
 overlay = Show[
   barsGraphics,
   Plot[PDF[NormalDistribution[mu, sigma], x], {x, 0.5, N0 + 1.5},
      PlotStyle -> Directive[Red, Thick, Dashed]],
   ListPlot[Table[{k + 1, binomPMF[[k + 1]]}, {k, 0, N0}],
-     PlotStyle -> Directive[PointSize[0.015], Darker@Green], Joined -> False],
+     PlotStyle -> Directive[PointSize[0.012], Darker@Green], Joined -> False],
   Frame -> True, Axes -> False,
   FrameLabel -> {"bin index", "density"},
-  PlotLabel -> Row[{"Empirical (blue bars), Binomial(10,\[VeryThinSpace]1/2) (green \[FilledCircle]),  Normal PDF (red dashed)  \[LongDash]  ",
-                    nTrials, " trials"}],
+  PlotLabel -> Row[{
+    "Physics Galton board: empirical (blue) vs Binomial(",
+    N0, ",\[VeryThinSpace]1/2) (green \[FilledCircle]) vs N(\[Mu],\[Sigma]\.b2) PDF (red dashed). ",
+    nTrials, " trials"}],
   PlotRange -> {{0.3, N0 + 1.7}, {0, yMax}},
-  ImageSize -> 900, AspectRatio -> 0.55];
+  ImageSize -> 1000, AspectRatio -> 0.5];
 
 outDir = FileNameJoin[{DirectoryName[$InputFileName, 2], "output"}];
-Export[FileNameJoin[{outDir, "03_histogram.png"}], empBars];
 Export[FileNameJoin[{outDir, "03_histogram_overlay.png"}], overlay];
+Export[FileNameJoin[{outDir, "03_histogram.png"}],
+   Show[barsGraphics, Frame -> True, Axes -> False,
+        FrameLabel -> {"bin index", "frequency"},
+        PlotLabel -> Row[{"Empirical distribution of final bin, n = ", nTrials}],
+        PlotRange -> {{0.3, N0 + 1.7}, {0, yMax}},
+        ImageSize -> 800, AspectRatio -> 0.55]];
 Export[FileNameJoin[{outDir, "03_histogram.csv"}],
-   Prepend[Table[{k, bins11[[k]], binomExp[[k]]}, {k, 1, N0 + 1}],
+   Prepend[Table[{k, bins[[k]], binomExp[[k]]}, {k, 1, nBins}],
            {"bin", "empirical", "binomial_expected"}]];
 
 Print["wrote output/03_histogram.png, _overlay.png, and .csv"];

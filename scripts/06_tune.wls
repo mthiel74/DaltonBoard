@@ -24,7 +24,7 @@ gravity  = getParam["GRAV", 9.81];
 damping  = getParam["DAMP", 0.985];       (* velocity kept per-step: 1 = no drag *)
 dampEvery = getParam["DAMP_EVERY", 4];    (* apply damping every N timesteps *)
 dt       = 1 / 240.;
-maxSteps = 6000;
+maxSteps = 1800;       (* 7.5 s of sim is plenty for a ball to reach the bin floor *)
 
 Print["params: gravity=", gravity, "  damping=", damping,
       "/", dampEvery, " steps  nTrials=", nTrials];
@@ -61,7 +61,8 @@ runOne[seed_Integer] := Module[
     vel    = (curPos - prevPos) / (dampEvery * dt);
     RapierSetBodyVelocity[worldId, bodyId, vel * damping];
     prevPos = curPos;
-    If[curPos[[3]] < GaltonBoard`$BinTopZ - 1.0 && nsteps > 300, Break[]]
+    (* Early-out once the ball has settled below the last peg row. *)
+    If[curPos[[3]] < -GaltonBoard`$PegRows*GaltonBoard`$PegDz - 0.8, Break[]]
   ];
   pos = current[[1]]["Bodies"][[1]]["Position"];
   DestroyPhysicsModel[model];

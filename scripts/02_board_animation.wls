@@ -1,77 +1,84 @@
 #!/usr/bin/env wolframscript
-(* 02_board_animation.wls -- real-physics Galton board.
+(* 02_board_animation.wls -- REAL-PHYSICS Galton board animation.
 
-   Many balls are released from a narrow "funnel" region directly above
-   the top peg (x ~ uniform in [-dx/2, +dx/2], z ~ jittered stack with
-   dzStack between balls, tiny random vx).  The pegs are PHYSICAL
-   cylinder colliders wrapped in FixedBody — balls genuinely bounce
-   off them as per Rapier's impulse-based rigid-body collisions.
+   Geometry + parameters match scripts/06_tune.wls which produces a
+   bell-curve distribution with 18-row rectangular alternating-offset
+   peg lattice (the classical physical Galton configuration).
 
-   Parameters follow the Wolfram GaltonBoardModel recipe:
-     - RowCount      = 18
-     - PegRadius     = 0.125 m   (ball radius 0.05 m, ratio 0.4)
-     - Peg spacing   = 0.5  m    (gap between peg edges = 0.25 m
-                                   = 2.5 * ball diameter so ball passes
-                                   easily)
-     - Restitution   = 0.5   (moderate bounce)
-     - Friction      = 0.3   (moderate; transfers spin)
-     - Gravity       = 9.81 m/s^2
+     * Balls are genuine Rapier DynamicBody spheres, pegs are
+       genuine FixedBody cylinders — balls physically bounce off
+       pegs, they never pass through.
+     * ball_r 0.08, peg_r 0.025 -> peg-to-ball radius ratio ~0.3;
+       dx 0.22 > 2*(ball_r + peg_r) = 0.21 so each ball hits exactly
+       ONE peg per row (overlapping contact zones would cancel
+       stochasticity).
+     * A small per-step linear velocity damping approximates air drag
+       (Rapier has no built-in drag); without it balls accelerate
+       indefinitely and skip rows.
+     * The peg layout is jittered slightly (per-simulation, not
+       per-ball) so the board isn't perfectly symmetric — this supplies
+       the stochasticity that deterministic rigid-body physics lacks.
+     * Multiple balls are released from a thin horizontal strip
+       centred over the top of the board, staggered vertically so
+       they enter the cascade one after another instead of all piling
+       on the apex peg.
 *)
 
 Needs["ArnoudBuzing`PhysicsModelLink`"];
 Get[FileNameJoin[{DirectoryName[$InputFileName], "board.wl"}]];
 
-SeedRandom[20260423];
+SeedRandom[20260424];
 
-CreatePhysicsModel  = ArnoudBuzing`PhysicsModelLink`CreatePhysicsModel;
-DynamicBody         = ArnoudBuzing`PhysicsModelLink`DynamicBody;
-FixedBody           = ArnoudBuzing`PhysicsModelLink`FixedBody;
-PhysicsModelEvolve  = ArnoudBuzing`PhysicsModelLink`PhysicsModelEvolve;
-PhysicsModelPlot    = ArnoudBuzing`PhysicsModelLink`PhysicsModelPlot;
-DestroyPhysicsModel = ArnoudBuzing`PhysicsModelLink`DestroyPhysicsModel;
+CreatePhysicsModel    = ArnoudBuzing`PhysicsModelLink`CreatePhysicsModel;
+DynamicBody           = ArnoudBuzing`PhysicsModelLink`DynamicBody;
+FixedBody             = ArnoudBuzing`PhysicsModelLink`FixedBody;
+PhysicsModelIterate   = ArnoudBuzing`PhysicsModelLink`PhysicsModelIterate;
+PhysicsModelPlot      = ArnoudBuzing`PhysicsModelLink`PhysicsModelPlot;
+DestroyPhysicsModel   = ArnoudBuzing`PhysicsModelLink`DestroyPhysicsModel;
+RapierGetBodyPositions = ArnoudBuzing`PhysicsModelLink`RapierGetBodyPositions;
+RapierSetBodyVelocity = ArnoudBuzing`PhysicsModelLink`RapierSetBodyVelocity;
 
 (* -- Parameters -- *)
-nBalls    = 120;
-dzStack   = 0.18;      (* ~= 2 * ball diameter so stacked balls don't overlap *)
-dt        = 1/240.;    (* fine dt to avoid tunneling at the tight peg gaps *)
-nFrames   = 3600;      (* 15 s of physics *)
-videoStep = 8;         (* keep every 8th frame for MP4 (450 frames / 15s @ 30fps) *)
-xSpread   = GaltonBoard`$PegDx / 2;   (* release range: ~one dx-wide funnel *)
+nBalls    = 30;
+xReleaseSpread = GaltonBoard`$PegDx;
+dzStack   = 0.22;
+dt        = 1/240.;
+nFrames   = 6000;            (* 25 s of physics *)
+videoStep = 15;              (* 400 frames @ 30fps = 13 s playback *)
+damping   = 0.99;            (* same drag as the histogram script *)
+dampEvery = 4;
+damping   = 0.99;            (* velocity kept per-damp-step *)
+dampEvery = 4;               (* physics steps per damping tick *)
+pegJitter = 0.025;           (* per-simulation random peg-x perturbation *)
 
-(* -- Balls: release positions form a narrow column just above the top peg.
-   Stagger them vertically so they enter sequentially rather than piling
-   on top of one another.  Small random vx breaks any residual symmetry. -- *)
+(* -- Balls: small x-spread, staggered z, random tiny vx -- *)
 balls = Table[
   GaltonBoard`MakeBall[
-    {RandomReal[{-xSpread, xSpread}],
-     GaltonBoard`$BoardTopZ + 1.0 + k*dzStack},
-    {RandomReal[{-0.15, 0.15}], 0.},
+    {RandomReal[{-xReleaseSpread, xReleaseSpread}],
+     GaltonBoard`$BoardTopZ + 0.6 + k*dzStack},
+    {RandomReal[{-0.05, 0.05}], 0.},
     Hue[Mod[k*0.09, 1]]],
   {k, 0, nBalls - 1}];
 
-(* -- Static bodies: pegs are REAL colliders. -- *)
-pegs  = GaltonBoard`PegList[];
+(* -- Static bodies: real pegs, bin separators, floor, boundary walls -- *)
+pegs  = GaltonBoard`PegList[pegJitter];
 bins  = GaltonBoard`BinSeparators[];
 floor = FixedBody[{GrayLevel[0.85],
           Cuboid[{-GaltonBoard`$BoardHalfWidth, -GaltonBoard`$SlabHalfY,
                   GaltonBoard`$BoardBottomZ},
                  { GaltonBoard`$BoardHalfWidth,  GaltonBoard`$SlabHalfY,
                   GaltonBoard`$BoardBottomZ + 0.12}]},
-          "Restitution" -> 0.1, "Friction" -> 0.8];
-
-stackTop = GaltonBoard`$BoardTopZ + 1.0 + (nBalls - 1)*dzStack + 0.5;
+          "Restitution" -> 0.1, "Friction" -> 0.9];
+stackTop = GaltonBoard`$BoardTopZ + 0.6 + (nBalls - 1)*dzStack + 0.5;
 walls    = GaltonBoard`BoundaryWalls[stackTop];
 
 model = CreatePhysicsModel[
   Join[balls, pegs, bins, {floor}, walls],
   "Gravity" -> {0., 0., -9.81},
   "Graphics3DOptions" -> {
-    (* Crop view to the peg + bin region so the tall initial ball-stack
-       sits above the visible frame and balls cascade into view. *)
     PlotRange    -> {{-GaltonBoard`$BoardHalfWidth, GaltonBoard`$BoardHalfWidth},
                      {-0.6, 0.6},
-                     {GaltonBoard`$BoardBottomZ - 0.15,
-                      GaltonBoard`$BoardTopZ + 1.8}},
+                     {GaltonBoard`$BoardBottomZ - 0.15, GaltonBoard`$BoardTopZ + 1.6}},
     Boxed        -> False,
     Axes         -> False,
     Lighting     -> "Neutral",
@@ -79,16 +86,37 @@ model = CreatePhysicsModel[
     ViewVertical -> {0, 0, 1},
     Background   -> RGBColor[0.97, 0.97, 1.0]}];
 
-Print["model: ", nBalls, " balls + ", Length[pegs], " pegs (",
-      GaltonBoard`$PegRows, " rows) + ", Length[bins], " bin separators + floor + 6 walls."];
-Print["  peg radius / ball radius = ",
-      GaltonBoard`$PegRadius / GaltonBoard`$BallRadius];
-Print["  peg-edge gap / ball diameter = ",
-      (GaltonBoard`$PegDx - 2*GaltonBoard`$PegRadius) / (2*GaltonBoard`$BallRadius)];
+worldId     = model[[1]]["WorldID"];
+ballHandles = Table[model[[1]]["Bodies"][[k]]["Handle"], {k, 1, nBalls}];
 
-Print["evolving ", nFrames, " frames @ dt=", 1.0*dt, " s (total ", nFrames*dt, "s)..."];
-t0     = AbsoluteTime[];
-frames = PhysicsModelEvolve[model, nFrames, dt];
+Print["model: ", nBalls, " balls + ", Length[pegs], " pegs (",
+      GaltonBoard`$PegRows, " rows x ", GaltonBoard`$PegCols,
+      " cols) + ", Length[bins], " bin separators + floor + 6 walls."];
+Print["  ball dia / peg dia = ",
+      2 GaltonBoard`$BallRadius / (2 GaltonBoard`$PegRadius),
+      " ; contact dist / (dx/2) = ",
+      (GaltonBoard`$PegRadius + GaltonBoard`$BallRadius) / (GaltonBoard`$PegDx/2)];
+
+(* -- Main loop: step physics; every `dampEvery` steps refresh each ball's
+   velocity (tiny damping factor ~= 1) so Rapier's body-sleep mechanism
+   doesn't freeze balls on top of pegs. Real air drag would do something
+   similar physically. -- *)
+Print["evolving ", nFrames, " frames @ dt=", 1.0*dt, " s..."];
+t0       = AbsoluteTime[];
+current  = model;
+prevPoss = Table[current[[1]]["Bodies"][[k]]["Position"], {k, 1, nBalls}];
+frames   = Reap[
+  Do[
+    current = PhysicsModelIterate[current, 1, dt];
+    If[Mod[step, dampEvery] == 0,
+      Do[Module[{curPos, vel},
+          curPos = current[[1]]["Bodies"][[b]]["Position"];
+          vel    = (curPos - prevPoss[[b]]) / (dampEvery * dt);
+          RapierSetBodyVelocity[worldId, ballHandles[[b]], vel * damping];
+          prevPoss[[b]] = curPos],
+        {b, 1, nBalls}]];
+    Sow[current],
+    {step, 1, nFrames}]][[2, 1]];
 Print["sim done in ", Round[AbsoluteTime[] - t0, 0.1], " s."];
 
 videoFrames = frames[[;; ;; videoStep]];
@@ -105,21 +133,18 @@ stillPath = FileNameJoin[{DirectoryName[$InputFileName, 2], "output", "02_board_
 Export[stillPath, PhysicsModelPlot[frames[[-1]]], ImageSize -> {900, 1350}];
 Print["wrote ", stillPath];
 
-(* Inspect final bin distribution *)
+(* -- Empirical bin counts from this physics run -- *)
 dynBodies = Select[frames[[-1]][[1]]["Bodies"], #["BodyType"] === "Dynamic" &];
 finalXs   = #["Position"][[1]] & /@ dynBodies;
 finalZs   = #["Position"][[3]] & /@ dynBodies;
+Print["final z min/max: ", Min[finalZs], " / ", Max[finalZs]];
+Print["BinTopZ = ", GaltonBoard`$BinTopZ];
 settled   = Pick[finalXs, # < GaltonBoard`$BinTopZ & /@ finalZs];
 Print["settled balls: ", Length[settled], " / ", Length[dynBodies]];
 If[Length[settled] > 0,
   binsCount = Table[
     Count[GaltonBoard`BinIndex /@ settled, b], {b, 1, GaltonBoard`$PegRows + 1}];
-  Print["bin counts: ", binsCount];
-  (* Scaled Binomial(18, 1/2) reference *)
-  refPMF = Table[Binomial[GaltonBoard`$PegRows, k]/2.^GaltonBoard`$PegRows,
-                  {k, 0, GaltonBoard`$PegRows}];
-  Print["Binomial(", GaltonBoard`$PegRows, ", 1/2)*n expected: ",
-        NumberForm[#, {5, 1}] & /@ (refPMF * Length[settled])]];
+  Print["bin counts: ", binsCount]];
 
 DestroyPhysicsModel[model];
 Print["done."];

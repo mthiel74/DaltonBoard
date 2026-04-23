@@ -23,8 +23,12 @@ $SlabHalfY::usage  = "$SlabHalfY = half-thickness of the slab in the Y direction
 $PegRows    = 18;
 $PegRadius  = 0.025;
 $BallRadius = 0.080;
-$PegDx      = 0.15;              (* < 2*(ball_r + peg_r) = 0.21, so zones overlap *)
-$PegDz      = 0.13;              (* = dx * sqrt(3)/2 *)
+(* dx = 0.22 > 2*contact_dist = 2*(ball_r + peg_r) = 0.21, so a ball hits
+   exactly ONE peg per row (adjacent peg's contact zones don't overlap).
+   This is critical: overlapping zones cause a ball near a mid-line to
+   touch both adjacent pegs at once, canceling its stochastic deflection. *)
+$PegDx      = 0.22;
+$PegDz      = 0.22;
 $SlabHalfY  = 0.14;
 
 (* -- Derived -- *)
@@ -53,7 +57,7 @@ PegList[jitter_?NumericQ] := Module[{row, j, offset, xj, x, pegs = {}},
         FixedBody[{GrayLevel[0.35],
           Cylinder[{{xj, -$SlabHalfY, -row*$PegDz},
                     {xj,  $SlabHalfY, -row*$PegDz}}, $PegRadius]},
-          "Restitution" -> 0.5, "Friction" -> 0.3]],
+          "Restitution" -> 0.5, "Friction" -> 0.0]],
       {j, 0, $PegCols - 1}],
     {row, 0, $PegRows - 1}];
   pegs];
@@ -85,7 +89,7 @@ MakeBall[{x_, z_}, {vx_: 0., vz_: 0.}, color_: Automatic] :=
   DynamicBody[{If[color === Automatic, Hue[RandomReal[]], color], Sphere[{x, 0., z}, $BallRadius]},
     "Density"     -> 1.0,
     "Restitution" -> 0.5,
-    "Friction"    -> 0.3,
+    "Friction"    -> 0.0,
     "Velocity"    -> {vx, 0., vz}];
 
 DefaultGraphics3DOpts::usage = "Plot options used for both the animation and histogram scripts.";
