@@ -44,7 +44,8 @@ bbox = PhysicsBoundaryBox[{
 
 model = CreatePhysicsModel[
   Join[balls, bbox],
-  "Gravity" -> {0., 0., 0.},   (* zero gravity chamber *)
+  "Gravity" -> {0., 0., -9.81},   (* normal gravity; restitution 0.95 means
+                                     balls bounce nearly forever *)
   "Graphics3DOptions" -> {
     PlotRange    -> {{-boxHalf, boxHalf}, {-boxHalf, boxHalf}, {-boxHalf, boxHalf}},
     Boxed        -> False, Axes -> False,

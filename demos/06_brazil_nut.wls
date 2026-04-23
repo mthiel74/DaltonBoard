@@ -63,6 +63,9 @@ front = mkWall[{-jarHalfX - wallThk, -jarHalfY - wallThk, 0.},
                { jarHalfX + wallThk, -jarHalfY,           jarH}];
 back  = mkWall[{-jarHalfX - wallThk,  jarHalfY,           0.},
                { jarHalfX + wallThk,  jarHalfY + wallThk, jarH}];
+(* Ceiling so balls can't escape out the top during shakes *)
+ceiling = mkWall[{-jarHalfX - wallThk, -jarHalfY - wallThk, jarH},
+                 { jarHalfX + wallThk,  jarHalfY + wallThk, jarH + wallThk}];
 
 bbox = PhysicsBoundaryBox[{
   {-jarHalfX - 0.1, -jarHalfY - 0.1, -0.05},
@@ -70,7 +73,7 @@ bbox = PhysicsBoundaryBox[{
   "Thickness" -> 0.2];
 
 model = CreatePhysicsModel[
-  Join[{floor, left, right, front, back, big}, smalls, bbox],
+  Join[{floor, left, right, front, back, ceiling, big}, smalls, bbox],
   "Gravity" -> {0., 0., -9.81},
   "Graphics3DOptions" -> {
     PlotRange    -> {{-jarHalfX - wallThk - 0.02, jarHalfX + wallThk + 0.02},
@@ -90,22 +93,33 @@ nDyn = Length[ballHandles];
 Print["dynamic bodies: ", nDyn];
 
 (* -- Main loop: step physics, kick every ~0.15 s -- *)
+(* Shake model: the container "moves" every kickEvery steps.  We
+   simulate that by ADDING a velocity impulse to every dynamic body
+   (estimated from position deltas).  The impulse is small enough
+   that balls don't fly out, but consistently-biased upward so the
+   granular system is energised against gravity. *)
 dt        = 1/240.;
 nFrames   = 7200;      (* 30 s *)
-kickEvery = 36;        (* 0.15 s *)
-kickVz    = 4.0;       (* upward velocity magnitude per kick *)
+kickEvery = 90;        (* 0.375 s between shake impulses *)
+kickVz    = 0.45;      (* gentle upward impulse per shake *)
+kickLat   = 0.15;      (* lateral jitter *)
 
+nBodies = Length[ballHandles];
 current = model;
+prevPoss = Table[current[[1]]["Bodies"][[k]]["Position"], {k, 1, nBodies}];
 frames  = Reap[
   Do[
     current = PhysicsModelIterate[current, 1, dt];
     If[Mod[step, kickEvery] == 0,
-      (* shake: give every dynamic body a random upward velocity *)
-      Do[
-        RapierSetBodyVelocity[worldId, h,
-          {RandomReal[{-0.3, 0.3}], RandomReal[{-0.3, 0.3}],
-           kickVz + RandomReal[{-0.5, 0.5}]}],
-        {h, ballHandles}]];
+      Do[Module[{pos, vest, vnew},
+          pos  = current[[1]]["Bodies"][[k]]["Position"];
+          vest = (pos - prevPoss[[k]]) / (kickEvery * dt);
+          vnew = vest + {RandomReal[{-kickLat, kickLat}],
+                         RandomReal[{-kickLat, kickLat}],
+                         kickVz};
+          RapierSetBodyVelocity[worldId, ballHandles[[k]], vnew];
+          prevPoss[[k]] = pos],
+        {k, 1, nBodies}]];
     Sow[current],
     {step, 1, nFrames}]][[2, 1]];
 

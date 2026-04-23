@@ -1,9 +1,11 @@
 #!/usr/bin/env wolframscript
-(* 09_breaking_wave.wls -- a wave of blocks cascading down an incline.
-   A dense stack of small cubes is set on the upper half of an
-   inclined ramp, behind a vertical gate.  The gate is thrown up at
-   t = 0 and the cubes slide / cascade down the ramp, crashing into
-   a catch basin at the bottom -- a "wave" of blocks. *)
+(* 09_breaking_wave.wls -- a "breaking wave" built from a granular
+   dam-break of cubes.  A tall rectangular column of ~250 small
+   cubes sits against a back wall; the front wall is removed at
+   t = 0 (heavy DynamicBody flung upward and out of the frame).
+   The column collapses forward and propagates along the floor as
+   a wedge whose leading edge curls -- the signature silhouette of
+   a breaking water wave, reproduced in rigid-body physics. *)
 
 Needs["ArnoudBuzing`PhysicsModelLink`"];
 Get[FileNameJoin[{DirectoryName[$InputFileName], "_common.wl"}]];
@@ -17,79 +19,71 @@ PhysicsBoundaryBox = ArnoudBuzing`PhysicsModelLink`PhysicsBoundaryBox;
 
 SeedRandom[9];
 
-(* -- Ramp: an inclined Cuboid at 28 deg.  Use Orientation rotation. -- *)
-rampLen   = 3.0;
-rampWid   = 0.8;
-rampThk   = 0.08;
-rampAngle = 28 Degree;
+(* -- Geometry -- *)
+cubeHalf    = 0.035;
+colXHalf    = 0.25;      (* column width in x *)
+colZ        = 1.20;      (* column height *)
+slabY       = 0.15;
+channelLen  = 3.0;
 
-(* Centre the ramp so its top is high-left and its bottom meets the floor at x=0. *)
-cx = -rampLen/2 * Cos[rampAngle];
-cz =  rampLen/2 * Sin[rampAngle] - rampThk;
-ramp = FixedBody[{GrayLevel[0.8],
-  Cuboid[{cx - rampLen/2, -rampWid/2, cz - rampThk/2},
-         {cx + rampLen/2,  rampWid/2, cz + rampThk/2}]},
-  "Orientation" -> RotationMatrix[-rampAngle, {0, 1, 0}],
-  "Restitution" -> 0.1, "Friction" -> 0.4];
+(* -- Cubes packed in a tall rectangular column behind the gate -- *)
+step = 2.05 cubeHalf;
+cubePos = Flatten[
+  Table[{x, y, z},
+    {x, -colXHalf + cubeHalf, -cubeHalf*1.5, step},    (* column is from -colXHalf to ~0 *)
+    {y, -slabY + cubeHalf, slabY - cubeHalf, step},
+    {z, cubeHalf + 0.01, colZ - cubeHalf, step}], 2];
+Print["cubes packed: ", Length[cubePos]];
 
-(* -- Cubes stacked on the upper half of the ramp -- *)
-cubeHalf    = 0.040;
-layerCount  = 6;
-cubesPerRow = 6;
-rowsAlong   = 8;   (* along ramp direction *)
+cubes = Table[
+  With[{p = cubePos[[k]]},
+    DynamicBody[{Hue[Mod[0.55 + 0.002 k, 1]],
+      Cuboid[p - {cubeHalf, cubeHalf, cubeHalf},
+             p + {cubeHalf, cubeHalf, cubeHalf}]},
+      "Density" -> 1.0, "Restitution" -> 0.05, "Friction" -> 0.5]],
+  {k, 1, Length[cubePos]}];
 
-(* Position cubes in a grid above the ramp surface (along the upper half). *)
-rampSurfaceY[s_] := (* s in [0,1]: fraction from bottom to top; returns world (x,z) *)
-  With[{localX = s * rampLen - rampLen/2},
-    {cx + localX * Cos[rampAngle], cz + (rampThk/2) Cos[rampAngle] + localX * Sin[-rampAngle]}];
-(* simpler: place cubes on the ramp's TOP face in world coords *)
-cubePositions = Flatten[Table[
-  With[{sx = -0.2 + 0.22 i, sy = -0.2 + 0.08 j, sz = 0.025 + 0.10 k},
-    With[{x = Cos[rampAngle] sx + Sin[rampAngle] sz + cx,
-          y = sy,
-          z = -Sin[rampAngle] sx + Cos[rampAngle] sz + cz + rampThk/2},
-      {x, y, z}]],
-  {i, 0, rowsAlong - 1}, {j, 0, cubesPerRow - 1}, {k, 0, layerCount - 1}], 2];
-Print["cubes placed: ", Length[cubePositions]];
+(* -- Gate: heavy DynamicBody that flies up and never returns -- *)
+gateThk = 0.02;
+gateH   = colZ + 0.05;
+gate = DynamicBody[{RGBColor[0.4, 0.3, 0.2],
+  Cuboid[{-gateThk, -slabY, 0.}, {gateThk, slabY, gateH}]},
+  "Density" -> 200.0, "Restitution" -> 0.05, "Friction" -> 0.3,
+  "Velocity" -> {0., 0., 40.0}];
 
-cubes = DynamicBody[
-  {Hue[Mod[0.5 + 0.35 #[[2]] + 0.12 #[[1]], 1]],
-   Cuboid[# - {cubeHalf, cubeHalf, cubeHalf},
-          # + {cubeHalf, cubeHalf, cubeHalf}]},
-  "Density" -> 1.0, "Restitution" -> 0.05, "Friction" -> 0.5] & /@ cubePositions;
-
-(* -- Catch basin wall at the bottom of the ramp to stop cubes -- *)
-catchWall = FixedBody[{GrayLevel[0.5],
-  Cuboid[{0.9, -rampWid/2 - 0.1, 0.}, {1.0, rampWid/2 + 0.1, 0.6}]},
-  "Restitution" -> 0.1, "Friction" -> 0.4];
-
-(* Floor catching cubes that miss the ramp *)
-floor = FixedBody[{GrayLevel[0.92],
-  Cuboid[{-rampLen - 0.5, -rampWid/2 - 0.1, -0.05},
-         { 1.2,             rampWid/2 + 0.1, 0.0}]},
+(* -- Back wall behind the column -- *)
+backWall = FixedBody[{GrayLevel[0.4],
+  Cuboid[{-colXHalf - 0.04, -slabY - 0.01, 0.},
+         {-colXHalf,          slabY + 0.01, gateH}]},
   "Restitution" -> 0.1, "Friction" -> 0.5];
 
+(* -- Floor + far-right "beach" catcher -- *)
+floor = FixedBody[{GrayLevel[0.92],
+  Cuboid[{-colXHalf - 0.05, -slabY - 0.01, -0.05},
+         { channelLen,        slabY + 0.01,  0.0}]},
+  "Restitution" -> 0.05, "Friction" -> 0.7];
+
 bbox = PhysicsBoundaryBox[{
-  {-rampLen - 0.5, -rampWid/2 - 0.1, -0.05},
-  { 1.3,            rampWid/2 + 0.1, 2.5}},
-  "Thickness" -> 0.2];
+  {-colXHalf - 0.10, -slabY - 0.02, -0.08},
+  { channelLen + 0.10,  slabY + 0.02, 80.0}},
+  "Thickness" -> 0.3];
 
 model = CreatePhysicsModel[
-  Join[{ramp, floor, catchWall}, cubes, bbox],
+  Join[{floor, backWall, gate}, cubes, bbox],
   "Gravity" -> {0., 0., -9.81},
   "Graphics3DOptions" -> {
-    PlotRange    -> {{-rampLen - 0.4, 1.2},
-                     {-rampWid/2 - 0.1, rampWid/2 + 0.1},
-                     {-0.05, 2.0}},
+    PlotRange    -> {{-colXHalf - 0.05, channelLen},
+                     {-slabY - 0.05, slabY + 0.05},
+                     {-0.05, colZ + 0.4}},
     Boxed        -> False, Axes -> False,
     Lighting     -> "Neutral",
-    ViewPoint    -> {0.5, -4.5, 1.5},
+    ViewPoint    -> {0.5, -22, 0.4},
     ViewVertical -> {0, 0, 1},
-    Background   -> RGBColor[0.97, 0.97, 1.0]}];
+    Background   -> RGBColor[0.9, 0.94, 1.0]}];
 
 Print["evolving..."];
 dt      = 1/240.;
-nFrames = 3000;
+nFrames = 1500;    (* 6.25 s *)
 t0      = AbsoluteTime[];
 frames  = PhysicsModelEvolve[model, nFrames, dt];
 Print["sim done in ", Round[AbsoluteTime[] - t0, 0.1], " s."];
@@ -100,9 +94,9 @@ gifPath   = FileNameJoin[{outDir, "09_breaking_wave.gif"}];
 stillPath = FileNameJoin[{outDir, "09_breaking_wave_final.png"}];
 
 GaltonBoardDemos`RenderVideo[frames, mp4Path,
-  "VideoStep" -> 8, "ImageSize" -> {1000, 600}, "FrameRate" -> 30];
+  "VideoStep" -> 4, "ImageSize" -> {1200, 520}, "FrameRate" -> 30];
 Print["wrote ", mp4Path];
-GaltonBoardDemos`MakeGif[mp4Path, gifPath, 600, 15];
+GaltonBoardDemos`MakeGif[mp4Path, gifPath, 720, 15];
 Print["wrote ", gifPath];
-Export[stillPath, PhysicsModelPlot[frames[[-1]]], ImageSize -> {1000, 600}];
+Export[stillPath, PhysicsModelPlot[frames[[-1]]], ImageSize -> {1200, 520}];
 Print["wrote ", stillPath];
