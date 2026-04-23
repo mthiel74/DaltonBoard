@@ -21,8 +21,8 @@ jarHalfY   = 0.18;
 jarHeight  = 1.00;     (* tall jar to hold the stack during settle *)
 wallThk    = 0.02;
 
-ballR      = 0.018;
-nBalls     = 1800;
+ballR      = 0.020;
+nBalls     = 1000;       (* fewer balls -> Rapier's solver resolves overlaps cleanly *)
 
 (* -- Ball stack: random positions in a column above the jar floor -- *)
 zBottom   = 0.05;
@@ -80,7 +80,7 @@ model = CreatePhysicsModel[
 
 Print["evolving..."];
 dt      = 1/240.;
-nFrames = 4200;
+nFrames = 6000;         (* longer settle time so overlaps resolve *)
 t0      = AbsoluteTime[];
 frames  = PhysicsModelEvolve[model, nFrames, dt];
 Print["sim done in ", Round[AbsoluteTime[] - t0, 0.1], " s."];

@@ -47,10 +47,10 @@ gateZ1  = containerH + 0.05;
 gate = DynamicBody[{RGBColor[0.4, 0.3, 0.2],
   Cuboid[{-gateThk, -slabHalfY, gateZ0},
          { gateThk,  slabHalfY, gateZ1}]},
-  "Density"     -> 50.0,     (* heavy -- resists grain pressure momentarily *)
+  "Density"     -> 200.0,    (* heavier so grain pressure can't deflect it *)
   "Restitution" -> 0.1,
   "Friction"    -> 0.4,
-  "Velocity"    -> {0., 0., 15.0}];    (* flies up *)
+  "Velocity"    -> {0., 0., 35.0}];   (* fast up -- doesn't return inside the sim *)
 
 (* -- Floor (extends from left container to right channel) -- *)
 floor = FixedBody[{GrayLevel[0.92],
@@ -64,11 +64,12 @@ backWall = FixedBody[{GrayLevel[0.4],
          {-containerW + 0.,        slabHalfY + 0.01, containerH + 0.1}]},
   "Restitution" -> 0.1, "Friction" -> 0.6];
 
-(* -- Bounding box (Y-slab + outer walls) -- *)
+(* -- Bounding box -- ceiling far up so the gate can fly out of sight
+   and not bounce back down into the flow during the sim window. *)
 bbox = PhysicsBoundaryBox[{
   {-containerW - 0.10, -slabHalfY - 0.02, -0.08},
-  { channelLen + 0.10,  slabHalfY + 0.02, containerH + 2.0}},
-  "Thickness" -> 0.2];
+  { channelLen + 0.10,  slabHalfY + 0.02, 80.0}},
+  "Thickness" -> 0.3];
 
 model = CreatePhysicsModel[
   Join[{floor, backWall, gate}, grains, bbox],
@@ -85,7 +86,9 @@ model = CreatePhysicsModel[
 
 Print["evolving..."];
 dt      = 1/240.;
-nFrames = 3600;     (* 15 s *)
+(* 5 s only -- gate flies to z > 60 m and doesn't come back; all grains
+   are well downstream by then. *)
+nFrames = 1200;
 t0      = AbsoluteTime[];
 frames  = PhysicsModelEvolve[model, nFrames, dt];
 Print["sim done in ", Round[AbsoluteTime[] - t0, 0.1], " s."];
