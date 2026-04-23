@@ -13,24 +13,25 @@
 Needs["ArnoudBuzing`PhysicsModelLink`"];
 Get[FileNameJoin[{DirectoryName[$InputFileName], "_common.wl"}]];
 
-CreatePhysicsModel = ArnoudBuzing`PhysicsModelLink`CreatePhysicsModel;
-DynamicBody        = ArnoudBuzing`PhysicsModelLink`DynamicBody;
-FixedBody          = ArnoudBuzing`PhysicsModelLink`FixedBody;
-PhysicsModelEvolve = ArnoudBuzing`PhysicsModelLink`PhysicsModelEvolve;
-PhysicsModelPlot   = ArnoudBuzing`PhysicsModelLink`PhysicsModelPlot;
-PhysicsBoundaryBox = ArnoudBuzing`PhysicsModelLink`PhysicsBoundaryBox;
-DestroyPhysicsModel = ArnoudBuzing`PhysicsModelLink`DestroyPhysicsModel;
+CreatePhysicsModel    = ArnoudBuzing`PhysicsModelLink`CreatePhysicsModel;
+DynamicBody           = ArnoudBuzing`PhysicsModelLink`DynamicBody;
+FixedBody             = ArnoudBuzing`PhysicsModelLink`FixedBody;
+PhysicsModelIterate   = ArnoudBuzing`PhysicsModelLink`PhysicsModelIterate;
+PhysicsModelPlot      = ArnoudBuzing`PhysicsModelLink`PhysicsModelPlot;
+PhysicsBoundaryBox    = ArnoudBuzing`PhysicsModelLink`PhysicsBoundaryBox;
+DestroyPhysicsModel   = ArnoudBuzing`PhysicsModelLink`DestroyPhysicsModel;
+RapierSetBodyVelocity = ArnoudBuzing`PhysicsModelLink`RapierSetBodyVelocity;
 
 SeedRandom[2];
 
 (* -- Parameters -- *)
 ballR     = 0.025;
-nBalls    = 250;          (* per friction panel *)
-floorHalf = 0.80;         (* floor half-width *)
-dropZ     = 0.30;         (* low release height -> gentle impact *)
-dropXHalf = 0.015;        (* very narrow release column *)
+nBalls    = 150;          (* per friction panel *)
+floorHalf = 0.60;         (* floor half-width *)
+dropZ     = 0.12;         (* just above floor *)
+dropXHalf = 0.01;
 dzStack   = 0.06;
-gSlow     = 3.0;          (* lower gravity -> slow rain, balls pile nicely *)
+gSlow     = 9.81;         (* full gravity; damping below keeps speeds bounded *)
 
 (* -- Run a single experiment with a given friction coefficient -- *)
 runOne[friction_, label_String] := Module[
@@ -72,9 +73,32 @@ runOne[friction_, label_String] := Module[
       ViewVertical -> {0, 0, 1},
       Background   -> RGBColor[0.97, 0.97, 1.0]}];
 
-  (* Evolve long enough for all balls to land + settle *)
+  (* Evolve with per-step velocity damping so balls arrive slowly
+     and settle on the pile instead of bouncing off the floor.
+     Ball handles are the first nBalls entries in the Bodies list. *)
   Print["evolving..."];
-  frames = PhysicsModelEvolve[model, 3600, 1/240.];
+  Module[{worldId, ballHandles, current, prevPos, dt, nFrames,
+          damping, dampEvery},
+    worldId = model[[1]]["WorldID"];
+    ballHandles = Table[model[[1]]["Bodies"][[k]]["Handle"], {k, 1, nBalls}];
+    current   = model;
+    prevPos   = Table[current[[1]]["Bodies"][[k]]["Position"], {k, 1, nBalls}];
+    dt        = 1/240.;
+    nFrames   = 4200;
+    damping   = 0.97;
+    dampEvery = 4;
+    frames = Reap[
+      Do[
+        current = PhysicsModelIterate[current, 1, dt];
+        If[Mod[step, dampEvery] == 0,
+          Do[Module[{pos, v},
+             pos = current[[1]]["Bodies"][[k]]["Position"];
+             v   = (pos - prevPos[[k]]) / (dampEvery * dt);
+             RapierSetBodyVelocity[worldId, ballHandles[[k]], v * damping];
+             prevPos[[k]] = pos],
+            {k, 1, nBalls}]];
+        Sow[current],
+        {step, 1, nFrames}]][[2, 1]]];
 
   lastFrame = frames[[-1]];
   finalPositions = #["Position"] & /@
