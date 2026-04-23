@@ -25,11 +25,11 @@ SeedRandom[2];
 
 (* -- Parameters -- *)
 ballR     = 0.025;
-nBalls    = 900;          (* per friction panel *)
-floorHalf = 1.20;         (* floor half-width *)
-dropZ     = 2.50;         (* height balls rain from *)
-dropXHalf = 0.05;         (* narrow release column *)
-dzStack   = 0.12;         (* vertical spacing in the release stack *)
+nBalls    = 400;          (* per friction panel *)
+floorHalf = 0.80;         (* floor half-width *)
+dropZ     = 0.80;         (* height balls rain from *)
+dropXHalf = 0.02;         (* very narrow release column *)
+dzStack   = 0.06;         (* ~ ball diameter: balls stacked tightly *)
 
 (* -- Run a single experiment with a given friction coefficient -- *)
 runOne[friction_, label_String] := Module[
@@ -55,7 +55,8 @@ runOne[friction_, label_String] := Module[
 
   bbox = PhysicsBoundaryBox[{
     {-floorHalf - 0.05, -floorHalf - 0.05, -0.15},
-    { floorHalf + 0.05,  floorHalf + 0.05,  dropZ + nBalls*dzStack + 0.5}}];
+    { floorHalf + 0.05,  floorHalf + 0.05,  dropZ + nBalls*dzStack + 0.5}},
+    "Thickness" -> 0.2];          (* thick walls -> balls can't tunnel through *)
 
   model = CreatePhysicsModel[
     Join[balls, {floor}, bbox],
@@ -72,7 +73,7 @@ runOne[friction_, label_String] := Module[
 
   (* Evolve long enough for all balls to land + settle *)
   Print["evolving..."];
-  frames = PhysicsModelEvolve[model, 2400, 1/240.];
+  frames = PhysicsModelEvolve[model, 3600, 1/240.];
 
   lastFrame = frames[[-1]];
   finalPositions = #["Position"] & /@
