@@ -21,15 +21,17 @@ PhysicsBoundaryBox = ArnoudBuzing`PhysicsModelLink`PhysicsBoundaryBox;
 
 SeedRandom[1];
 
-(* -- Geometry (tuned for an iconic sand-timer silhouette) -- *)
-outerR    = 0.70;    (* outer radius at top / bottom *)
-aperture  = 0.05;    (* NARROW aperture: ~2.5 x ball diameter -> slow flow *)
-halfH     = 1.20;    (* half-height of the hourglass *)
-wallThk   = 0.04;    (* thicker walls -> visible and impossible to tunnel through *)
-slabY     = 0.05;    (* half-thickness of the slab (Y direction) *)
+(* -- Geometry: an iconic sand-timer silhouette.  The ratio
+   outerR/halfH is large so the slant angle is ~52 deg from
+   vertical, giving the classic hourglass look. *)
+outerR    = 0.80;    (* outer radius at the widest points *)
+aperture  = 0.05;    (* narrow middle *)
+halfH     = 0.65;    (* half-height -> outerR/halfH = 1.23 -> ~52 deg slant *)
+wallThk   = 0.05;    (* thick walls -> clearly visible *)
+slabY     = 0.05;
 
 ballR     = 0.022;
-nBalls    = 700;
+nBalls    = 600;
 
 wallLen   = Sqrt[(outerR - aperture)^2 + halfH^2];
 wallAngle = ArcTan[(outerR - aperture)/halfH];
@@ -58,7 +60,7 @@ bottomRight = slantWall[{aperture, 0}, {+outerR, -halfH}];
 bottomLeft  = slantWall[{-aperture, 0}, {-outerR, -halfH}];
 
 (* -- Top and bottom "caps" closing off the funnels -- *)
-capThk  = 0.03;
+capThk  = 0.04;
 topCap  = FixedBody[{GrayLevel[0.35],
   Cuboid[{-outerR - capThk, -slabY, halfH}, {outerR + capThk, slabY, halfH + capThk}]},
   "Restitution" -> 0.1, "Friction" -> 0.6];
@@ -66,15 +68,25 @@ botCap  = FixedBody[{GrayLevel[0.35],
   Cuboid[{-outerR - capThk, -slabY, -halfH - capThk}, {outerR + capThk, slabY, -halfH}]},
   "Restitution" -> 0.1, "Friction" -> 0.6];
 
+(* -- Visible "glass" side walls for visual clarity (non-physics) *)
+sideL = FixedBody[{Opacity[0.15], GrayLevel[0.4],
+  Cuboid[{-outerR - capThk, -slabY - 0.005, -halfH - capThk},
+         {-outerR,            slabY + 0.005,  halfH + capThk}]},
+  "Restitution" -> 0.1, "Friction" -> 0.4];
+sideR = FixedBody[{Opacity[0.15], GrayLevel[0.4],
+  Cuboid[{ outerR,           -slabY - 0.005, -halfH - capThk},
+         { outerR + capThk,   slabY + 0.005,  halfH + capThk}]},
+  "Restitution" -> 0.1, "Friction" -> 0.4];
+
 (* -- Sand: grid-pack the upper funnel, reject points outside the walls -- *)
 step     = 2.1 * ballR;
 sandPos  = Flatten[
   Table[
     With[{wallX = aperture + (outerR - aperture) * z / halfH},
       Table[
-        If[Abs[x] < wallX - 1.1 ballR, {x, 0., z}, Nothing],
+        If[Abs[x] < wallX - 1.2 ballR, {x, 0., z}, Nothing],
         {x, -outerR + ballR, outerR - ballR, step}]],
-    {z, aperture + 1.2 ballR, halfH - 2 ballR, step}],
+    {z, 0.03, halfH - 2 ballR, step}],
   1];
 sandPos = RandomSample[sandPos, UpTo[nBalls]];
 actualN = Length[sandPos];
@@ -93,12 +105,12 @@ bbox = PhysicsBoundaryBox[{
   { outerR + 0.03,  slabY + 0.01,  halfH + 0.05}}];
 
 model = CreatePhysicsModel[
-  Join[{topRight, topLeft, bottomRight, bottomLeft, topCap, botCap}, sand, bbox],
+  Join[{topRight, topLeft, bottomRight, bottomLeft, topCap, botCap, sideL, sideR}, sand, bbox],
   "Gravity" -> {0., 0., -9.81},
   "Graphics3DOptions" -> {
-    PlotRange    -> {{-outerR - 0.05, outerR + 0.05},
+    PlotRange    -> {{-outerR - 0.15, outerR + 0.15},
                      {-slabY - 0.05, slabY + 0.05},
-                     {-halfH - 0.25, halfH + 0.05}},
+                     {-halfH - 0.15, halfH + 0.15}},
     Boxed        -> False, Axes -> False,
     Lighting     -> "Neutral",
     ViewPoint    -> {0, -18, 0},
