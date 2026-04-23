@@ -39,12 +39,14 @@ RapierGetBodyPositions = ArnoudBuzing`PhysicsModelLink`RapierGetBodyPositions;
 RapierSetBodyVelocity = ArnoudBuzing`PhysicsModelLink`RapierSetBodyVelocity;
 
 (* -- Parameters -- *)
-nBalls    = 80;
-xReleaseSpread = GaltonBoard`$PegDx/4;  (* narrow -> cleaner bell centred on middle bin *)
-dzStack   = 0.22;
+nBalls    = 25;
+xReleaseSpread = GaltonBoard`$PegDx/6;
+dzStack   = 1.50;            (* LARGE spacing: each ball has time to reach the bins
+                                before the next one enters the peg array, so they
+                                cascade independently (minimal ball-ball collisions) *)
 dt        = 1/240.;
-nFrames   = 9600;            (* 40 s of physics *)
-videoStep = 24;              (* 400 frames @ 30fps = 13 s playback *)
+nFrames   = 12000;           (* 50 s of physics -- enough for all 25 balls to cascade *)
+videoStep = 30;              (* 400 frames @ 30fps = 13 s playback *)
 damping   = 0.99;            (* same drag as the histogram script *)
 dampEvery = 4;
 damping   = 0.99;            (* velocity kept per-damp-step *)
